@@ -34,7 +34,7 @@ public partial class MainWindow : Window
     private DateOnly _shownDate;
     private DateTime _lastHomeWrite, _lastCacheWrite;
     private string? _currentHash;
-    private readonly DesktopHost _desktop;
+    private readonly DesktopAnchor _desktop;
     private bool _applyingDisplay, _desktopDragging;
     private Point _dragCursor;
     private Rect _dragBounds;
@@ -42,9 +42,9 @@ public partial class MainWindow : Window
     public MainWindow(Storage storage, WidgetSettings settings, bool demo, string? export)
     {
         _storage = storage; _settings = settings; _demo = demo;
-        InitializeComponent(); ApplyTheme(); _desktop = new DesktopHost(this);
+        InitializeComponent(); ApplyTheme(); _desktop = new DesktopAnchor(this);
         if (demo) Title += " — デモ";
-        Width = Math.Clamp(double.IsFinite(settings.Width) ? settings.Width : 390, 340, 1000);
+        Width = Math.Clamp(double.IsFinite(settings.Width) ? settings.Width : 390, 340, Math.Max(340, SystemParameters.VirtualScreenWidth));
         Height = Math.Clamp(double.IsFinite(settings.Height) ? settings.Height : 600, 420, 1400);
         Topmost = !settings.DesktopMode && settings.AlwaysOnTop;
         ShowInTaskbar = !settings.DesktopMode || demo;
@@ -72,7 +72,7 @@ public partial class MainWindow : Window
         Closing += OnClosing;
         Closed += (_, _) =>
         {
-            _timer.Stop(); _tray?.Dispose();
+            _timer.Stop(); _tray?.Dispose(); _desktop.Dispose();
             if (!_exit && !_demo && _settings.DesktopMode && System.Windows.Application.Current is App app)
                 app.RecreateDesktopWidget(_storage, _settings);
             else System.Windows.Application.Current.Shutdown();
@@ -187,7 +187,7 @@ public partial class MainWindow : Window
             }
             else
             {
-                _desktop.Detach(); ShowInTaskbar = true; Topmost = _settings.AlwaysOnTop;
+                _desktop.Detach(); ShowInTaskbar = true; Topmost = _settings.AlwaysOnTop; Show();
             }
             UpdateDisplayControls();
             if (!_demo) File.WriteAllText(Path.Combine(_storage.DirectoryPath, "desktop-status.json"),
@@ -199,7 +199,8 @@ public partial class MainWindow : Window
     {
         var requested = _storage.LoadSettings();
         _settings.DesktopMode = requested.DesktopMode; _settings.AlwaysOnTop = requested.AlwaysOnTop;
-        Show(); WindowState = WindowState.Normal; EnsureVisible(); ApplyDisplayMode();
+        if (!_settings.DesktopMode) Show();
+        WindowState = WindowState.Normal; EnsureVisible(); ApplyDisplayMode();
         if (!_settings.DesktopMode || _demo) Activate();
     }
     private void Header_MouseDown(object sender, MouseButtonEventArgs e)
@@ -210,7 +211,7 @@ public partial class MainWindow : Window
         {
             if (_desktop.IsAttached)
             {
-                _desktopDragging = true; _dragCursor = DesktopHost.CursorPosition; _dragBounds = _desktop.ScreenBounds;
+                _desktopDragging = true; _dragCursor = DesktopAnchor.CursorPosition; _dragBounds = _desktop.ScreenBounds;
                 ((UIElement)sender).CaptureMouse(); e.Handled = true;
             }
             else DragMove();
@@ -219,7 +220,7 @@ public partial class MainWindow : Window
     private void Header_MouseMove(object sender, MouseEventArgs e)
     {
         if (!_desktopDragging || e.LeftButton != MouseButtonState.Pressed) return;
-        var cursor = DesktopHost.CursorPosition;
+        var cursor = DesktopAnchor.CursorPosition;
         _desktop.Move(_dragBounds.Left + cursor.X - _dragCursor.X, _dragBounds.Top + cursor.Y - _dragCursor.Y);
     }
     private void Header_MouseUp(object sender, MouseButtonEventArgs e)
@@ -236,6 +237,10 @@ public partial class MainWindow : Window
     private void Task_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button { DataContext: ItemView view }) return;
+        ShowTaskDetails(view);
+    }
+    private void ShowTaskDetails(ItemView view)
+    {
         var panel = new StackPanel { Margin = new Thickness(22) };
         panel.Children.Add(Text(view.Title, 20, true));
         panel.Children.Add(Text(view.Badge + (string.IsNullOrEmpty(view.Deadline) ? "" : "  ·  " + view.Deadline), 12));
@@ -250,9 +255,9 @@ public partial class MainWindow : Window
             Content = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }, FontFamily = FontFamily };
         details.PreviewKeyDown += (_, key) => { if (key.Key == Key.Escape) details.Close(); };
         bool disableDesktop = _desktop.IsAttached;
-        if (disableDesktop) IsEnabled = false;
+        if (disableDesktop) _desktop.SetEnabled(false);
         try { details.ShowDialog(); }
-        finally { if (disableDesktop) IsEnabled = true; }
+        finally { if (disableDesktop) _desktop.SetEnabled(true); }
     }
 
     private TextBlock Text(string text, double size, bool bold = false) => new() { Text = text, FontSize = size, FontWeight = bold ? FontWeights.SemiBold : FontWeights.Normal,
@@ -292,9 +297,9 @@ public partial class MainWindow : Window
         };
         dialog.PreviewKeyDown += (_, key) => { if (key.Key == Key.Escape) dialog.Close(); };
         bool disableDesktop = _desktop.IsAttached;
-        if (disableDesktop) IsEnabled = false;
+        if (disableDesktop) _desktop.SetEnabled(false);
         try { dialog.ShowDialog(); }
-        finally { if (disableDesktop) IsEnabled = true; }
+        finally { if (disableDesktop) _desktop.SetEnabled(true); }
     }
 
     private void CreateTray()

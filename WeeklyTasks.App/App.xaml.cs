@@ -15,6 +15,7 @@ public partial class App : System.Windows.Application
     private RegisteredWaitHandle? _showListener;
     protected override async void OnStartup(StartupEventArgs e)
     {
+        System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
         base.OnStartup(e);
         string? Arg(string key) { int i = Array.IndexOf(e.Args, key); return i >= 0 && i + 1 < e.Args.Length ? e.Args[i + 1] : null; }
         string? dataDir = Arg("--data-dir");

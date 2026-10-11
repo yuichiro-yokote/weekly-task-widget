@@ -9,7 +9,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AssemblyName>Yokote.WeeklyTasks</AssemblyName>
     <Product>1週間のタスク</Product>
-    <Version>0.2.0</Version>
+    <Version>0.2.1</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
   <ItemGroup><ProjectReference Include="../WeeklyTasks.Core/WeeklyTasks.Core.csproj" /></ItemGroup>
