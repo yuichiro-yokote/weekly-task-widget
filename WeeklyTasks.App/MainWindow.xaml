@@ -23,7 +23,7 @@
   <Border BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="12" Background="{DynamicResource CanvasBrush}">
     <Grid>
       <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-      <Border Background="{DynamicResource TintBrush}" CornerRadius="12,12,0,0" Padding="18,14,12,13" MouseLeftButtonDown="Header_MouseDown">
+      <Border Background="{DynamicResource TintBrush}" CornerRadius="12,12,0,0" Padding="18,14,12,13" MouseLeftButtonDown="Header_MouseDown" MouseMove="Header_MouseMove" MouseLeftButtonUp="Header_MouseUp">
         <Grid>
           <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
           <StackPanel>
@@ -31,8 +31,8 @@
             <TextBlock x:Name="RangeText" Foreground="{DynamicResource MutedBrush}" FontSize="12" Margin="0,5,0,0"/>
           </StackPanel>
           <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top">
-            <Button x:Name="PinButton" Content="固定" Click="Pin_Click" Padding="7,4" Margin="0,0,4,0" FontSize="11" ToolTip="最前面表示の切り替え"/>
-            <Button Content="―" Click="Hide_Click" Padding="8,3" ToolTip="通知領域に隠す" AutomationProperties.Name="パネルを隠す"/>
+            <Button x:Name="PinButton" Content="デスクトップ" Click="Pin_Click" Padding="7,4" Margin="0,0,4,0" FontSize="11" ToolTip="デスクトップとウィンドウ表示の切り替え"/>
+            <Button x:Name="HideButton" Content="―" Click="Hide_Click" Padding="8,3" ToolTip="通知領域に隠す" AutomationProperties.Name="パネルを隠す"/>
           </StackPanel>
         </Grid>
       </Border>

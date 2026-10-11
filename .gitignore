@@ -9,6 +9,7 @@ artifacts/
 **/settings.json
 **/worker/
 **/refresh-error.txt
+**/desktop-status.json
 **/sdk-download.json
 **/dotnet-sdk.zip
 **/dotnet10/

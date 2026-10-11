@@ -34,15 +34,21 @@ public partial class MainWindow : Window
     private DateOnly _shownDate;
     private DateTime _lastHomeWrite, _lastCacheWrite;
     private string? _currentHash;
+    private readonly DesktopHost _desktop;
+    private bool _applyingDisplay, _desktopDragging;
+    private Point _dragCursor;
+    private Rect _dragBounds;
 
     public MainWindow(Storage storage, WidgetSettings settings, bool demo, string? export)
     {
         _storage = storage; _settings = settings; _demo = demo;
-        InitializeComponent(); ApplyTheme();
+        InitializeComponent(); ApplyTheme(); _desktop = new DesktopHost(this);
         if (demo) Title += " — デモ";
         Width = Math.Clamp(double.IsFinite(settings.Width) ? settings.Width : 390, 340, 1000);
         Height = Math.Clamp(double.IsFinite(settings.Height) ? settings.Height : 600, 420, 1400);
-        Topmost = settings.AlwaysOnTop;
+        Topmost = !settings.DesktopMode && settings.AlwaysOnTop;
+        ShowInTaskbar = !settings.DesktopMode || demo;
+        ShowActivated = !settings.DesktopMode || demo;
         var area = SystemParameters.WorkArea;
         Left = settings.Left is double left && double.IsFinite(left) ? left : area.Right - Width - 22;
         Top = settings.Top is double top && double.IsFinite(top) ? top : area.Top + 28;
@@ -52,6 +58,7 @@ public partial class MainWindow : Window
         Loaded += async (_, _) =>
         {
             _loaded = true;
+            ApplyDisplayMode();
             if (!demo) { CreateTray(); SetStartup(settings.StartWithWindows); settings.StartWithWindows = File.Exists(StartupPath); storage.SaveSettings(settings); }
             CheckSource();
             _timer.Tick += (_, _) => Poll(); _timer.Start();
@@ -63,7 +70,13 @@ public partial class MainWindow : Window
         };
         LocationChanged += (_, _) => SaveGeometry(); SizeChanged += (_, _) => SaveGeometry();
         Closing += OnClosing;
-        Closed += (_, _) => System.Windows.Application.Current.Shutdown();
+        Closed += (_, _) =>
+        {
+            _timer.Stop(); _tray?.Dispose();
+            if (!_exit && !_demo && _settings.DesktopMode && System.Windows.Application.Current is App app)
+                app.RecreateDesktopWidget(_storage, _settings);
+            else System.Windows.Application.Current.Shutdown();
+        };
     }
 
     private void ApplyTheme()
@@ -94,7 +107,7 @@ public partial class MainWindow : Window
         ReviewExpander.Visibility = (_saved?.Plan.Review.Count ?? 0) > 0 ? Visibility.Visible : Visibility.Collapsed;
         ReviewExpander.Header = "確認したいこと  " + (_saved?.Plan.Review.Count ?? 0) + "件";
         UpdatedText.Text = _saved is null ? "表示中はAIを呼び出しません" : "最終整理 " + _saved.GeneratedAt.ToString("M/d HH:mm", culture) + "  ·  Codex";
-        PinButton.Content = Topmost ? "固定中" : "固定";
+        UpdateDisplayControls();
         if (_demo) { NoticeText.Text = "これは架空のタスクを使った画面サンプルです。"; NoticeBox.Visibility = Visibility.Visible; RefreshButton.IsEnabled = false; }
         else UpdateNotice();
     }
@@ -117,7 +130,7 @@ public partial class MainWindow : Window
         {
             var source = HomeSource.Read(_settings.SourcePath);
             _currentHash = source.Hash; _lastHomeWrite = File.GetLastWriteTimeUtc(_settings.SourcePath);
-            StatusText.Text = "ホームを参照 · 更新はボタンを押したときだけ";
+            StatusText.Text = _settings.DesktopMode && !_desktop.IsAttached ? _desktop.LastError : "ホームを参照 · 更新はボタンを押したときだけ";
             UpdateNotice();
         }
         catch (IOException) { StatusText.Text = "ホームを読めません。設定で参照ファイルを確認してください。"; }
@@ -126,6 +139,7 @@ public partial class MainWindow : Window
 
     private void Poll()
     {
+        if (!_demo && _settings.DesktopMode && !_desktop.IsAttached) ApplyDisplayMode();
         if (_refresh is not null || _demo) return;
         if (_shownDate != Dates.Today) { RenderDays(); ApplyTheme(); }
         if (File.GetLastWriteTimeUtc(_settings.SourcePath) != _lastHomeWrite) CheckSource();
@@ -151,14 +165,65 @@ public partial class MainWindow : Window
         finally { _refresh.Dispose(); _refresh = null; RefreshButton.Visibility = Visibility.Visible; CancelButton.Visibility = Visibility.Collapsed; }
     }
     private void Cancel_Click(object sender, RoutedEventArgs e) => _refresh?.Cancel();
-    private void Pin_Click(object sender, RoutedEventArgs e) { Topmost = !Topmost; _settings.AlwaysOnTop = Topmost; _storage.SaveSettings(_settings); PinButton.Content = Topmost ? "固定中" : "固定"; }
-    private void Hide_Click(object sender, RoutedEventArgs e) => Hide();
+    private void Pin_Click(object sender, RoutedEventArgs e)
+    { _settings.DesktopMode = !_settings.DesktopMode; ApplyDisplayMode(); _storage.SaveSettings(_settings); }
+    private void Hide_Click(object sender, RoutedEventArgs e) { if (!_settings.DesktopMode || _demo) Hide(); }
+    private void UpdateDisplayControls()
+    {
+        bool desktop = _settings.DesktopMode && !_demo;
+        PinButton.Content = desktop ? "デスクトップ" : "ウィンドウ";
+        HideButton.Visibility = desktop ? Visibility.Collapsed : Visibility.Visible;
+    }
+    private void ApplyDisplayMode()
+    {
+        if (_applyingDisplay) return;
+        _applyingDisplay = true;
+        try
+        {
+            if (_settings.DesktopMode && !_demo)
+            {
+                Topmost = false; ShowInTaskbar = false;
+                if (!_desktop.Attach()) StatusText.Text = _desktop.LastError;
+            }
+            else
+            {
+                _desktop.Detach(); ShowInTaskbar = true; Topmost = _settings.AlwaysOnTop;
+            }
+            UpdateDisplayControls();
+            if (!_demo) File.WriteAllText(Path.Combine(_storage.DirectoryPath, "desktop-status.json"),
+                System.Text.Json.JsonSerializer.Serialize(_desktop.Status(), JsonData.Options), new UTF8Encoding(false));
+        }
+        finally { _applyingDisplay = false; }
+    }
+    public void RestoreVisibility()
+    {
+        var requested = _storage.LoadSettings();
+        _settings.DesktopMode = requested.DesktopMode; _settings.AlwaysOnTop = requested.AlwaysOnTop;
+        Show(); WindowState = WindowState.Normal; EnsureVisible(); ApplyDisplayMode();
+        if (!_settings.DesktopMode || _demo) Activate();
+    }
     private void Header_MouseDown(object sender, MouseButtonEventArgs e)
     {
         if (e.OriginalSource is DependencyObject obj)
             for (DependencyObject? p = obj; p is not null; p = VisualTreeHelper.GetParent(p)) if (p is Button) return;
-        if (e.LeftButton == MouseButtonState.Pressed) DragMove();
+        if (e.LeftButton == MouseButtonState.Pressed)
+        {
+            if (_desktop.IsAttached)
+            {
+                _desktopDragging = true; _dragCursor = DesktopHost.CursorPosition; _dragBounds = _desktop.ScreenBounds;
+                ((UIElement)sender).CaptureMouse(); e.Handled = true;
+            }
+            else DragMove();
+        }
     }
+    private void Header_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_desktopDragging || e.LeftButton != MouseButtonState.Pressed) return;
+        var cursor = DesktopHost.CursorPosition;
+        _desktop.Move(_dragBounds.Left + cursor.X - _dragCursor.X, _dragBounds.Top + cursor.Y - _dragCursor.Y);
+    }
+    private void Header_MouseUp(object sender, MouseButtonEventArgs e)
+    { if (!_desktopDragging) return; _desktopDragging = false; ((UIElement)sender).ReleaseMouseCapture(); SaveGeometry(); }
 
     private void Home_Click(object sender, RoutedEventArgs e) => OpenHome();
     private void OpenHome()
@@ -180,11 +245,14 @@ public partial class MainWindow : Window
         { panel.Children.Add(Text(source.Heading + " · " + source.Line + "行目", 11)); panel.Children.Add(Text(source.Text, 12)); }
         var open = new Button { Content = "ホームを開く", HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 14, 0, 0), IsEnabled = !_demo };
         open.Click += (_, _) => OpenHome(); panel.Children.Add(open);
-        var details = new Window { Title = "タスクの詳細", Owner = this, Width = 530, Height = 550, MinWidth = 380, MinHeight = 350,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner, Background = (Brush)FindResource("CanvasBrush"), Topmost = Topmost,
+        var details = new Window { Title = "タスクの詳細", Owner = _desktop.IsAttached ? null : this, Width = 530, Height = 550, MinWidth = 380, MinHeight = 350,
+            WindowStartupLocation = _desktop.IsAttached ? WindowStartupLocation.CenterScreen : WindowStartupLocation.CenterOwner, Background = (Brush)FindResource("CanvasBrush"), Topmost = Topmost,
             Content = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }, FontFamily = FontFamily };
         details.PreviewKeyDown += (_, key) => { if (key.Key == Key.Escape) details.Close(); };
-        details.ShowDialog();
+        bool disableDesktop = _desktop.IsAttached;
+        if (disableDesktop) IsEnabled = false;
+        try { details.ShowDialog(); }
+        finally { if (disableDesktop) IsEnabled = true; }
     }
 
     private TextBlock Text(string text, double size, bool bold = false) => new() { Text = text, FontSize = size, FontWeight = bold ? FontWeights.SemiBold : FontWeights.Normal,
@@ -200,37 +268,44 @@ public partial class MainWindow : Window
         var choose = new Button { Content = "参照ファイルを変更", HorizontalAlignment = HorizontalAlignment.Left };
         choose.Click += (_, _) => { var picker = new Microsoft.Win32.OpenFileDialog { Filter = "Markdown|*.md", CheckFileExists = true }; if (picker.ShowDialog() == true) path.Text = picker.FileName; };
         panel.Children.Add(choose);
-        var top = new CheckBox { Content = "他のアプリの上に表示する", IsChecked = _settings.AlwaysOnTop, Margin = new Thickness(0, 20, 0, 12) };
+        var desktop = new CheckBox { Content = "デスクトップに埋め込む", IsChecked = _settings.DesktopMode && !_demo, IsEnabled = !_demo, Margin = new Thickness(0, 20, 0, 12) };
+        var top = new CheckBox { Content = "ウィンドウ表示時、他のアプリの上に表示する", IsChecked = _settings.AlwaysOnTop, IsEnabled = desktop.IsChecked != true, Margin = new Thickness(0, 0, 0, 12) };
+        desktop.Checked += (_, _) => top.IsEnabled = false;
+        desktop.Unchecked += (_, _) => top.IsEnabled = true;
         var start = new CheckBox { Content = "Windowsログイン時に起動する", IsChecked = _settings.StartWithWindows && !_demo, IsEnabled = !_demo, Margin = new Thickness(0, 0, 0, 16) };
-        panel.Children.Add(top); panel.Children.Add(start);
+        panel.Children.Add(desktop); panel.Children.Add(top); panel.Children.Add(start);
         panel.Children.Add(Text("更新ボタンを押したときだけ、既存のChatGPTログインでCodexを使います。通常の表示ではAIを呼び出しません。", 12));
         var reset = new Button { Content = "表示位置を右上へ戻す", HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 12) };
         reset.Click += (_, _) => { var area = SystemParameters.WorkArea; Left = area.Right - Width - 22; Top = area.Top + 28; EnsureVisible(); };
         panel.Children.Add(reset);
         var save = new Button { Content = "保存して閉じる", HorizontalAlignment = HorizontalAlignment.Right, Padding = new Thickness(15, 8, 15, 8) };
         panel.Children.Add(save);
-        var dialog = new Window { Title = "タスクパネルの設定", Owner = this, Width = 440, SizeToContent = SizeToContent.Height, MaxHeight = 700,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner, Background = (Brush)FindResource("CanvasBrush"), Content = panel, Topmost = Topmost,
+        var dialog = new Window { Title = "タスクパネルの設定", Owner = _desktop.IsAttached ? null : this, Width = 440, SizeToContent = SizeToContent.Height, MaxHeight = 700,
+            WindowStartupLocation = _desktop.IsAttached ? WindowStartupLocation.CenterScreen : WindowStartupLocation.CenterOwner, Background = (Brush)FindResource("CanvasBrush"), Content = panel, Topmost = Topmost,
             FontFamily = FontFamily, ResizeMode = ResizeMode.NoResize };
         save.Click += (_, _) =>
         {
             _settings.SourcePath = path.Text; _settings.AlwaysOnTop = top.IsChecked == true; _settings.StartWithWindows = start.IsChecked == true;
-            Topmost = _settings.AlwaysOnTop;
+            _settings.DesktopMode = desktop.IsChecked == true;
             if (!_demo) { SetStartup(_settings.StartWithWindows); _settings.StartWithWindows = File.Exists(StartupPath); }
-            _storage.SaveSettings(_settings); CheckSource(); RenderDays(); dialog.Close();
+            _storage.SaveSettings(_settings); CheckSource(); RenderDays(); dialog.Close(); ApplyDisplayMode();
         };
         dialog.PreviewKeyDown += (_, key) => { if (key.Key == Key.Escape) dialog.Close(); };
-        dialog.ShowDialog();
+        bool disableDesktop = _desktop.IsAttached;
+        if (disableDesktop) IsEnabled = false;
+        try { dialog.ShowDialog(); }
+        finally { if (disableDesktop) IsEnabled = true; }
     }
 
     private void CreateTray()
     {
         var menu = new Forms.ContextMenuStrip();
-        menu.Items.Add("パネルを表示", null, (_, _) => Dispatcher.Invoke(() => { Show(); EnsureVisible(); Activate(); }));
+        menu.Items.Add("タスクを表示", null, (_, _) => Dispatcher.Invoke(RestoreVisibility));
+        menu.Items.Add("設定", null, (_, _) => Dispatcher.Invoke(() => Settings_Click(this, new RoutedEventArgs())));
         menu.Items.Add("ホームを開く", null, (_, _) => Dispatcher.Invoke(OpenHome));
         menu.Items.Add("終了", null, (_, _) => Dispatcher.Invoke(() => { _exit = true; Close(); }));
         _tray = new Forms.NotifyIcon { Text = "1週間のタスク", Icon = System.Drawing.SystemIcons.Information, Visible = true, ContextMenuStrip = menu };
-        _tray.DoubleClick += (_, _) => Dispatcher.Invoke(() => { Show(); EnsureVisible(); Activate(); });
+        _tray.DoubleClick += (_, _) => Dispatcher.Invoke(RestoreVisibility);
     }
     private static string StartupPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Startup), "WeeklyTasks.lnk");
     private void SetStartup(bool enabled)
@@ -260,13 +335,19 @@ public partial class MainWindow : Window
     }
     private void SaveGeometry()
     {
-        if (!_loaded || _demo || WindowState != WindowState.Normal) return;
-        _settings.Left = Left; _settings.Top = Top; _settings.Width = ActualWidth; _settings.Height = ActualHeight;
+        if (!_loaded || _demo || _applyingDisplay || WindowState != WindowState.Normal) return;
+        if (_desktop.IsAttached)
+        {
+            var bounds = _desktop.ScreenBounds; var scale = _desktop.DpiScale;
+            _settings.Left = bounds.Left / scale; _settings.Top = bounds.Top / scale;
+            _settings.Width = bounds.Width / scale; _settings.Height = bounds.Height / scale;
+        }
+        else { _settings.Left = Left; _settings.Top = Top; _settings.Width = ActualWidth; _settings.Height = ActualHeight; }
         _storage.SaveSettings(_settings);
     }
     private void OnClosing(object? sender, CancelEventArgs e)
     {
-        if (!_exit && !_demo) { e.Cancel = true; Hide(); return; }
+        if (!_exit && !_demo) { e.Cancel = true; if (!_settings.DesktopMode) Hide(); return; }
         _refresh?.Cancel(); _timer.Stop(); _tray?.Dispose();
     }
 

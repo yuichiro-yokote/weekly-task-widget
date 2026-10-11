@@ -32,4 +32,5 @@ Check("cache roundtrip; malformed cache is ignored", () =>
     finally { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
 });
 Check("schema and serializer use same fields", () => { using var schema = JsonDocument.Parse(CodexRunner.Schema); Assert(schema.RootElement.GetProperty("properties").TryGetProperty("days", out _)); var round = JsonSerializer.Deserialize<AiPlan>(JsonSerializer.Serialize(EmptyWeek(), JsonData.Options), JsonData.Options)!; Assert(round.Days.Count == 7); });
+Check("existing settings migrate to desktop mode without losing position", () => { var settings = JsonSerializer.Deserialize<WidgetSettings>("{\"alwaysOnTop\":true,\"width\":390,\"height\":600,\"left\":100,\"top\":40}", JsonData.Options)!; Assert(settings.DesktopMode && settings.Left == 100 && settings.Top == 40); });
 Console.WriteLine($"{passed} checks passed.");

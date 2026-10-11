@@ -25,6 +25,8 @@ public partial class App : System.Windows.Application
             var storage = new Storage(dataDir);
             var settings = storage.LoadSettings();
             if (Arg("--source") is string source) { settings.SourcePath = Path.GetFullPath(source); storage.SaveSettings(settings); }
+            if (e.Args.Contains("--desktop") || e.Args.Contains("--window"))
+            { settings.DesktopMode = e.Args.Contains("--desktop"); storage.SaveSettings(settings); }
             if (e.Args.Contains("--refresh-only"))
             {
                 try { await new CodexRunner(storage).RefreshAsync(settings.SourcePath, null, CancellationToken.None); Shutdown(0); }
@@ -44,9 +46,15 @@ public partial class App : System.Windows.Application
             MainWindow = window;
             window.Show();
             _showListener = ThreadPool.RegisterWaitForSingleObject(_showRequest, (_, _) => Dispatcher.BeginInvoke(() =>
-            { window.Show(); window.WindowState = WindowState.Normal; window.Activate(); }), null, Timeout.Infinite, false);
+            { if (MainWindow is MainWindow current) current.RestoreVisibility(); }), null, Timeout.Infinite, false);
         }
         catch (Exception ex) { System.Windows.MessageBox.Show("起動できませんでした。\n" + ex.Message, "1週間のタスク"); Shutdown(1); }
+    }
+    internal async void RecreateDesktopWidget(Storage storage, WidgetSettings settings)
+    {
+        await System.Threading.Tasks.Task.Delay(1500);
+        if (Dispatcher.HasShutdownStarted) return;
+        var next = new MainWindow(storage, settings, false, null); MainWindow = next; next.Show();
     }
     protected override void OnExit(ExitEventArgs e) { _showListener?.Unregister(null); _showRequest?.Dispose(); _instance?.Dispose(); base.OnExit(e); }
 }

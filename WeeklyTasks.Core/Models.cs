@@ -44,6 +44,7 @@ public sealed class WidgetSettings
 {
     public string SourcePath { get; set; } = DefaultSourcePath;
     public bool AlwaysOnTop { get; set; } = true;
+    public bool DesktopMode { get; set; } = true;
     public bool StartWithWindows { get; set; } = true;
     public double? Left { get; set; }
     public double? Top { get; set; }
