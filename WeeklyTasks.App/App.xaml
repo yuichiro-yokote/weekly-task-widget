@@ -8,6 +8,8 @@
     <SolidColorBrush x:Key="AccentBrush" Color="#17735F"/>
     <SolidColorBrush x:Key="TintBrush" Color="#E5F1EB"/>
     <SolidColorBrush x:Key="HoverBrush" Color="#EFF5F1"/>
+    <SolidColorBrush x:Key="SundayBrush" Color="#B65348"/>
+    <SolidColorBrush x:Key="SaturdayBrush" Color="#4F789B"/>
     <Style TargetType="TextBlock"><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/><Setter Property="FontFamily" Value="Yu Gothic UI, Segoe UI"/></Style>
     <Style TargetType="Button">
       <Setter Property="FontFamily" Value="Yu Gothic UI, Segoe UI"/><Setter Property="FontSize" Value="13"/><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>

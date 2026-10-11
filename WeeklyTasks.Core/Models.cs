@@ -48,8 +48,8 @@ public sealed class WidgetSettings
     public bool StartWithWindows { get; set; } = true;
     public double? Left { get; set; }
     public double? Top { get; set; }
-    public double Width { get; set; } = 390;
-    public double Height { get; set; } = 600;
+    public double Width { get; set; } = 1000;
+    public double Height { get; set; } = 760;
     public static string DefaultSourcePath
     {
         get

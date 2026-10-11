@@ -38,14 +38,16 @@ public partial class MainWindow : Window
     private bool _applyingDisplay, _desktopDragging;
     private Point _dragCursor;
     private Rect _dragBounds;
+    private DateOnly _calendarSelected = Dates.Today;
+    private DateOnly _calendarMonth = new(Dates.Today.Year, Dates.Today.Month, 1);
 
     public MainWindow(Storage storage, WidgetSettings settings, bool demo, string? export)
     {
         _storage = storage; _settings = settings; _demo = demo;
         InitializeComponent(); ApplyTheme(); _desktop = new DesktopAnchor(this);
         if (demo) Title += " — デモ";
-        Width = Math.Clamp(double.IsFinite(settings.Width) ? settings.Width : 390, 340, Math.Max(340, SystemParameters.VirtualScreenWidth));
-        Height = Math.Clamp(double.IsFinite(settings.Height) ? settings.Height : 600, 420, 1400);
+        Width = Math.Clamp(double.IsFinite(settings.Width) ? settings.Width : 1000, 760, Math.Max(760, SystemParameters.VirtualScreenWidth));
+        Height = Math.Clamp(double.IsFinite(settings.Height) ? settings.Height : 760, 680, 1400);
         Topmost = !settings.DesktopMode && settings.AlwaysOnTop;
         ShowInTaskbar = !settings.DesktopMode || demo;
         ShowActivated = !settings.DesktopMode || demo;
@@ -83,13 +85,17 @@ public partial class MainWindow : Window
     {
         bool dark = (Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "AppsUseLightTheme", 1) as int?) == 0;
         if (!dark) return;
-        foreach (var (key, color) in new[] { ("CanvasBrush", "#192421"), ("CardBrush", "#23332D"), ("TextBrush", "#E5ECE7"), ("MutedBrush", "#A2B4AC"), ("LineBrush", "#36463E"), ("AccentBrush", "#4FB996"), ("TintBrush", "#243D32"), ("HoverBrush", "#2B4337") })
+        foreach (var (key, color) in new[] { ("CanvasBrush", "#192421"), ("CardBrush", "#23332D"), ("TextBrush", "#E5ECE7"), ("MutedBrush", "#A2B4AC"), ("LineBrush", "#36463E"), ("AccentBrush", "#4FB996"), ("TintBrush", "#243D32"), ("HoverBrush", "#2B4337"), ("SundayBrush", "#F2958D"), ("SaturdayBrush", "#88B8DC") })
             System.Windows.Application.Current.Resources[key] = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color));
     }
 
     private void RenderDays()
     {
-        var today = Dates.Today; _shownDate = today;
+        var today = Dates.Today;
+        if (_calendarSelected == _shownDate) _calendarSelected = today;
+        if (_shownDate != default && _calendarMonth.Year == _shownDate.Year && _calendarMonth.Month == _shownDate.Month)
+            _calendarMonth = new(today.Year, today.Month, 1);
+        _shownDate = today;
         var culture = CultureInfo.GetCultureInfo("ja-JP");
         RangeText.Text = today.ToString("M/d(ddd)", culture) + " — " + today.AddDays(6).ToString("M/d(ddd)", culture) + (_demo ? "  ·  デモ" : "");
         var views = Enumerable.Range(0, 7).Select(i =>
@@ -97,7 +103,7 @@ public partial class MainWindow : Window
             var date = today.AddDays(i);
             var day = _saved?.Plan.Days.FirstOrDefault(d => d.Date == Dates.Iso(date));
             var items = (day?.Items ?? []).Select(item => new ItemView(item)).ToList();
-            return new DayView(i == 0 ? "今日" : i == 1 ? "明日" : date.ToString("M/d", culture),
+            return new DayView(date, i == 0 ? "今日" : i == 1 ? "明日" : date.ToString("M/d", culture),
                 i < 2 ? date.ToString("M/d(ddd)", culture) : date.ToString("dddd", culture),
                 items.Count > 0 ? items.Count + "件" : "", items,
                 day is null ? "未整理 — 更新すると表示されます" : "予定されているタスクはありません");
@@ -110,6 +116,57 @@ public partial class MainWindow : Window
         UpdateDisplayControls();
         if (_demo) { NoticeText.Text = "これは架空のタスクを使った画面サンプルです。"; NoticeBox.Visibility = Visibility.Visible; RefreshButton.IsEnabled = false; }
         else UpdateNotice();
+        RenderCalendar();
+    }
+
+    private void RenderCalendar()
+    {
+        var culture = CultureInfo.GetCultureInfo("ja-JP");
+        var today = Dates.Today;
+        Brush Resource(string key) => (Brush)FindResource(key);
+        CalendarMonthText.Text = _calendarMonth.ToString("yyyy年M月", culture);
+        CalendarDaysControl.ItemsSource = CalendarMonth.GridDates(_calendarMonth).Select(date =>
+        {
+            var day = _saved?.Plan.Days.FirstOrDefault(d => d.Date == Dates.Iso(date));
+            bool selected = date == _calendarSelected;
+            bool isToday = date == today;
+            var foreground = selected ? Brushes.White : Resource(date.DayOfWeek == DayOfWeek.Sunday ? "SundayBrush" : date.DayOfWeek == DayOfWeek.Saturday ? "SaturdayBrush" : "TextBrush");
+            return new CalendarDateView(date, date.Day.ToString(culture), day?.Items.Count > 0 ? day.Items.Count + "件" : isToday ? "今日" : "",
+                selected ? Resource("AccentBrush") : day is not null ? Resource("TintBrush") : Brushes.Transparent,
+                foreground, isToday ? Resource("AccentBrush") : Brushes.Transparent, new Thickness(isToday ? 2 : 1),
+                date.Month == _calendarMonth.Month ? 1 : 0.45,
+                date.ToString("M月d日(ddd)", culture) + (isToday ? "・今日" : "") + (day is null ? "・未整理" : "・" + day.Items.Count + "件"));
+        }).ToList();
+        var selectedDay = _saved?.Plan.Days.FirstOrDefault(d => d.Date == Dates.Iso(_calendarSelected));
+        CalendarSelectionText.Text = _calendarSelected.ToString("M/d(ddd)", culture) + (_calendarSelected == today ? "  今日" : "") + (selectedDay is null ? "" : "  ·  " + selectedDay.Items.Count + "件");
+        CalendarTasksControl.ItemsSource = (selectedDay?.Items ?? []).Select(item => new ItemView(item)).ToList();
+        CalendarEmptyText.Text = selectedDay is null ? "この日の一覧は未整理です。更新すると、今日から7日分を整理します。" : selectedDay.Items.Count == 0 ? "予定されているタスクはありません。" : "";
+        CalendarEmptyText.Visibility = CalendarEmptyText.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void CalendarPrevious_Click(object sender, RoutedEventArgs e) => ChangeCalendarMonth(-1);
+    private void CalendarNext_Click(object sender, RoutedEventArgs e) => ChangeCalendarMonth(1);
+    private void ChangeCalendarMonth(int delta)
+    {
+        // Keep the adjacent grid dates within DateOnly's supported range.
+        if (delta < 0 && _calendarMonth <= new DateOnly(1, 2, 1) || delta > 0 && _calendarMonth >= new DateOnly(9999, 11, 1)) return;
+        _calendarMonth = _calendarMonth.AddMonths(delta); RenderCalendar();
+    }
+    private void CalendarToday_Click(object sender, RoutedEventArgs e) => SelectCalendarDate(Dates.Today);
+    private void CalendarDay_Click(object sender, RoutedEventArgs e)
+    { if (sender is Button { DataContext: CalendarDateView date }) SelectCalendarDate(date.Date); }
+    private void SelectCalendarDate(DateOnly date)
+    {
+        _calendarSelected = date; _calendarMonth = new(date.Year, date.Month, 1); RenderCalendar();
+        if (DaysControl.ItemsSource is not IEnumerable<DayView> views) return;
+        var day = views.FirstOrDefault(d => d.Date == date);
+        if (day is null) return;
+        DaysControl.UpdateLayout();
+        if (DaysControl.ItemContainerGenerator.ContainerFromItem(day) is FrameworkElement container)
+        {
+            var point = container.TranslatePoint(new Point(0, 0), ListScroll);
+            ListScroll.ScrollToVerticalOffset(ListScroll.VerticalOffset + point.Y - ListScroll.Padding.Top);
+        }
     }
 
     private void UpdateNotice()
@@ -385,8 +442,10 @@ public partial class MainWindow : Window
     }
 }
 
-public sealed record DayView(string Label, string DateLabel, string CountLabel, List<ItemView> Items, string EmptyText)
+public sealed record DayView(DateOnly Date, string Label, string DateLabel, string CountLabel, List<ItemView> Items, string EmptyText)
 { public Visibility EmptyVisibility => Items.Count == 0 ? Visibility.Visible : Visibility.Collapsed; }
+
+public sealed record CalendarDateView(DateOnly Date, string Number, string Marker, Brush Background, Brush Foreground, Brush BorderBrush, Thickness BorderThickness, double Opacity, string Description);
 
 public sealed class ItemView(PlanItem item)
 {
