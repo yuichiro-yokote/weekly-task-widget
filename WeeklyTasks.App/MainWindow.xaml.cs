@@ -183,6 +183,7 @@ public partial class MainWindow : Window
         var details = new Window { Title = "タスクの詳細", Owner = this, Width = 530, Height = 550, MinWidth = 380, MinHeight = 350,
             WindowStartupLocation = WindowStartupLocation.CenterOwner, Background = (Brush)FindResource("CanvasBrush"), Topmost = Topmost,
             Content = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }, FontFamily = FontFamily };
+        details.PreviewKeyDown += (_, key) => { if (key.Key == Key.Escape) details.Close(); };
         details.ShowDialog();
     }
 
@@ -218,6 +219,7 @@ public partial class MainWindow : Window
             if (!_demo) { SetStartup(_settings.StartWithWindows); _settings.StartWithWindows = File.Exists(StartupPath); }
             _storage.SaveSettings(_settings); CheckSource(); RenderDays(); dialog.Close();
         };
+        dialog.PreviewKeyDown += (_, key) => { if (key.Key == Key.Escape) dialog.Close(); };
         dialog.ShowDialog();
     }
 

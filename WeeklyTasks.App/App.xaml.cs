@@ -11,6 +11,8 @@ namespace WeeklyTasks.App;
 public partial class App : System.Windows.Application
 {
     private Mutex? _instance;
+    private EventWaitHandle? _showRequest;
+    private RegisteredWaitHandle? _showListener;
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -31,7 +33,8 @@ public partial class App : System.Windows.Application
             }
             string mutexName = "Local\\WeeklyTasks-" + HomeSource.Hash(storage.DirectoryPath)[..16];
             _instance = new Mutex(true, mutexName, out bool first);
-            if (!first) { System.Windows.MessageBox.Show("1週間のタスクはすでに起動しています。通知領域のアイコンから再表示できます。", "1週間のタスク"); Shutdown(); return; }
+            _showRequest = new EventWaitHandle(false, EventResetMode.AutoReset, mutexName + "-show");
+            if (!first) { _showRequest.Set(); Shutdown(); return; }
             DispatcherUnhandledException += (_, args) =>
             {
                 System.Windows.MessageBox.Show("操作に失敗しました。\n" + args.Exception.Message, "1週間のタスク");
@@ -40,8 +43,10 @@ public partial class App : System.Windows.Application
             var window = new MainWindow(storage, settings, demo, Arg("--export-preview"));
             MainWindow = window;
             window.Show();
+            _showListener = ThreadPool.RegisterWaitForSingleObject(_showRequest, (_, _) => Dispatcher.BeginInvoke(() =>
+            { window.Show(); window.WindowState = WindowState.Normal; window.Activate(); }), null, Timeout.Infinite, false);
         }
         catch (Exception ex) { System.Windows.MessageBox.Show("起動できませんでした。\n" + ex.Message, "1週間のタスク"); Shutdown(1); }
     }
-    protected override void OnExit(ExitEventArgs e) { _instance?.Dispose(); base.OnExit(e); }
+    protected override void OnExit(ExitEventArgs e) { _showListener?.Unregister(null); _showRequest?.Dispose(); _instance?.Dispose(); base.OnExit(e); }
 }
